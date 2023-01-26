@@ -1,0 +1,4 @@
+.env
+.ENV
+/public 
+credentials.json
