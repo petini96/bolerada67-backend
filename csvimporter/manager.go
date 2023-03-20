@@ -8,10 +8,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 )
@@ -24,6 +26,7 @@ func init() {
 		ClientSecret: "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",
 		Scopes: []string{
 			"https://www.googleapis.com/auth/spreadsheets.readonly",
+			"https://www.googleapis.com/auth/drive",
 			// "https://www.googleapis.com/auth/userinfo.profile",
 			// "https://www.googleapis.com/auth/userinfo.email",
 		},
@@ -139,6 +142,124 @@ type DBCreator interface {
 	CreateDB(srv *sheets.Service) error
 }
 
+func PermissionGoogleDrive(ctx *gin.Context, id string) {
+	url := googleOauthConfig.AuthCodeURL(oauthStateString)
+	ctx.Redirect(http.StatusTemporaryRedirect, url)
+}
+
+func DriveProducts(ctx *gin.Context, srv *drive.Service) []DrivePhotoResponse {
+	pageSize := ctx.Query("pageSize")
+	//pageToken := ctx.Query("pageToken")
+	// Carrega o arquivo JSON das credenciais de serviço
+	// credentials, err := ioutil.ReadFile("./credentials.json")
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// // Cria o cliente da API do Google Drive
+
+	// config, err := google.ConfigFromJSON(credentials, drive.DriveReadonlyScope)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// client := getClient(config)
+
+	// srv, err := drive.NewService(ctx, option.WithHTTPClient(client))
+	// if err != nil {
+	// 	log.Fatalf("Unable to retrieve Sheets client: %v", err)
+	// }
+
+	// ID da pasta compartilhada
+	// c.Query("id")
+	folderID := ctx.Param("id")
+	// Listar os arquivos na pasta compartilhada
+	// files, err := srv.Files.List().
+	// 	Q(fmt.Sprintf("'%s' in parents", folderID)).
+	// 	Fields("nextPageToken, files(id, name, webViewLink, webContentLink)").
+	// 	Do()
+	// if err != nil {
+	// 	log.Fatalf("Não foi possível listar os arquivos: %v", err)
+	// }
+
+	// // Iterar sobre os arquivos e exibir as URLs das imagens
+	// for _, file := range files.Files {
+	// 	if file.MimeType == "image/jpeg" || file.MimeType == "image/png" {
+	// 		url := file.WebContentLink
+	// 		// Exibir a URL da imagem em uma tag de imagem em seu site
+	// 		log.Fatal("<img src='%s' alt='%s' />\n", url, file.Name)
+	// 	}
+	// }
+	response := []DrivePhotoResponse{}
+	//var files *drive.FileList
+	var err error
+	num, err := strconv.ParseInt(pageSize, 10, 64)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pageToken := ctx.DefaultQuery("pageToken", "")
+	q := srv.Files.List().Q(fmt.Sprintf("'%s' in parents and trashed = false", folderID)).PageSize(num).PageToken(pageToken)
+	r, err := q.Do()
+	if err != nil {
+		fmt.Println("moio")
+	}
+
+	for _, f := range r.Files {
+		response = append(response, DrivePhotoResponse{
+			ID:   f.Id,
+			Name: f.Name,
+		})
+	}
+	// Check if there are more results
+	if r.NextPageToken != "" {
+		ctx.Header("nextPageToken", r.NextPageToken)
+	}
+	// for {
+	// 	if pageToken == "" {
+	// 		files, err = srv.Files.List().Q(fmt.Sprintf("'%s' in parents and trashed = false", folderID)).PageSize(num).Fields("files(id, name)").Do()
+	// 		if err != nil {
+	// 			log.Fatalf("Falha ao listar os arquivos na pasta compartilhada: %v", err)
+	// 		}
+
+	// 	} else {
+	// 		files, err = srv.Files.List().Q(fmt.Sprintf("'%s' in parents and trashed = false", folderID)).Fields("files(id, name)").Do()
+	// 		if err != nil {
+	// 			log.Fatalf("Falha ao listar os arquivos na pasta compartilhada: %v", err)
+	// 		}
+	// 	}
+
+	// 	// Imprimir os nomes e IDs dos arquivos na pasta compartilhada
+	// 	for _, f := range files.Files {
+
+	// 		// ID do arquivo da imagem
+	// 		// fileID := f.Id
+
+	// 		response = append(response, DrivePhotoResponse{
+	// 			ID:   f.Id,
+	// 			Name: f.Name,
+	// 		})
+	// 		// // Acessar as informações do arquivo
+	// 		// file, err := srv.Files.Get(fileID).Fields("webViewLink, webContentLink").Do()
+	// 		// if err != nil {
+	// 		// 	log.Fatalf("Não foi possível obter as informações do arquivo: %v", err)
+	// 		// }
+
+	// 		// // Exibir a imagem em uma tag de imagem em seu site
+	// 		// fmt.Printf("<img src='%s' alt='imagem' />\n", file.WebViewLink)
+
+	// 		// url := f.WebContentLink
+	// 		// fmt.Printf("Nome: %s, ID: %s\n", f.Name, f.Id, url)
+	// 	}
+	// 	// verifica se há mais páginas
+	// 	if files.NextPageToken == "" {
+	// 		break
+	// 	}
+
+	// 	// configura o token de página para obter a próxima página
+	// 	pageToken = files.NextPageToken
+	// }
+	return response
+
+}
 func PermissionGoogle(ctx *gin.Context) {
 	url := googleOauthConfig.AuthCodeURL(oauthStateString)
 	ctx.Redirect(http.StatusTemporaryRedirect, url)
