@@ -50,7 +50,7 @@ func NewProductDB(db *gorm.DB) *ProductDB {
 func (p ProductDB) CreateDB(srv *sheets.Service) error {
 	p.DB.AutoMigrate(&Product{})
 
-	spreadsheetId := "1_zvgbpYAljsiIxCCIkBDGsFHj12j9TKbl5I4O94y-38"
+	spreadsheetId := "1xAcWfbWLulOTIcPHxvKsBlLeIaQam5OQf7BMMzhm71Y"
 	readRange := "produtos!A3:H"
 
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetId, readRange).Do()

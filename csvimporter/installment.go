@@ -19,7 +19,6 @@ type Installment struct {
 	PaymentForecast time.Time `json:"payment_forecast"`
 	PaymentDate     time.Time `json:"payment_date"`
 	PaymentType     string    `json:"payment_type"`
-	Proof           string    `json:"proof"`
 	DebtID          int       `gorm:"constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"debt_id"`
 }
 
@@ -42,11 +41,37 @@ func NewInstallmentDB(db *gorm.DB) *InstallmentDB {
 	}
 }
 
+func ParseMoneyValue(value string) (float64, error) {
+	value = strings.ReplaceAll(value, "R$", "")
+	value = strings.ReplaceAll(value, ",", ".")
+	value = strings.ReplaceAll(value, " ", "")
+
+	floatValue, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return floatValue, nil
+}
+
+func ParseMoneyValueUS(value string) (float64, error) {
+	value = strings.ReplaceAll(value, "$", "")
+	value = strings.ReplaceAll(value, ",", ".")
+	value = strings.ReplaceAll(value, " ", "")
+
+	floatValue, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return floatValue, nil
+}
+
 //Gets category data from google sheets especific tab. If the proccess fail will thorw an error.
 func (d *InstallmentDB) CreateDB(srv *sheets.Service) error {
 	d.DB.AutoMigrate(&Installment{})
 
-	spreadsheetId := "1378DbQepNREL6WGkTsbjDb-rw2nXUJvcThQwso_yf6I"
+	spreadsheetId := "1xAcWfbWLulOTIcPHxvKsBlLeIaQam5OQf7BMMzhm71Y"
 	readRange := "parcelas!A3:I"
 
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetId, readRange).Do()
@@ -57,15 +82,18 @@ func (d *InstallmentDB) CreateDB(srv *sheets.Service) error {
 	if len(resp.Values) == 0 {
 		return errors.New("No data found.")
 	} else {
-
 		for _, row := range resp.Values {
-
+			//log.Fatal(row[0].(string), row[1].(string), row[2].(string), row[3].(string), row[4].(string), row[5].(string), row[6].(string))
 			order, err := strconv.Atoi(row[1].(string))
 			if err != nil {
 				log.Fatal(err)
 			}
-
-			value, err := strconv.ParseFloat(strings.Replace(row[2].(string), ",", ".", -1), 64)
+			// value, err := strconv.ParseFloat(strings.Replace(row[2].(string), ",", ".", -1), 64)
+			// if err != nil {
+			// 	log.Fatal(err)
+			// }
+			//log.Fatal(strings.Replace(row[2].(string), ",", ".", -1))
+			value, err := ParseMoneyValue(row[2].(string))
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -81,14 +109,13 @@ func (d *InstallmentDB) CreateDB(srv *sheets.Service) error {
 				log.Fatal(err)
 			}
 
-			paymentDate, err := time.Parse(model, row[5].(string))
+			var paymentDate time.Time
+			paymentDate, err = time.Parse(model, row[5].(string))
 			if err != nil {
-				log.Fatal(err)
+				paymentDate = time.Time{}
 			}
 
 			paymentType := row[6].(string)
-
-			proof := row[1].(string)
 
 			debtID, err := strconv.Atoi(row[7].(string))
 			if err != nil {
@@ -102,7 +129,6 @@ func (d *InstallmentDB) CreateDB(srv *sheets.Service) error {
 				PaymentForecast: paymentForecast,
 				PaymentDate:     paymentDate,
 				PaymentType:     paymentType,
-				Proof:           proof,
 				DebtID:          debtID,
 			}
 

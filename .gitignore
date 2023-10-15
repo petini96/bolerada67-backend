@@ -2,3 +2,9 @@
 .ENV
 /public 
 credentials.json
+.history
+
+.env.local
+.env.prod
+
+token.json

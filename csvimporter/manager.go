@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+
+	"github.com/redis/go-redis/v9"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/oauth2"
@@ -55,7 +58,7 @@ type UserGoogleResponse struct {
 	Locale        string `json:"locale"`
 }
 
-//USER INFO
+//Get's the user info from google.
 func getUserInfo(state string, code string) (UserGoogleResponse, error) {
 	if state != oauthStateString {
 		return UserGoogleResponse{}, fmt.Errorf("invalid oauth state")
@@ -147,119 +150,259 @@ func PermissionGoogleDrive(ctx *gin.Context, id string) {
 	ctx.Redirect(http.StatusTemporaryRedirect, url)
 }
 
-func DriveProducts(ctx *gin.Context, srv *drive.Service) []DrivePhotoResponse {
-	pageSize := ctx.Query("pageSize")
-	//pageToken := ctx.Query("pageToken")
-	// Carrega o arquivo JSON das credenciais de serviço
-	// credentials, err := ioutil.ReadFile("./credentials.json")
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// // Cria o cliente da API do Google Drive
-
-	// config, err := google.ConfigFromJSON(credentials, drive.DriveReadonlyScope)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// client := getClient(config)
-
-	// srv, err := drive.NewService(ctx, option.WithHTTPClient(client))
-	// if err != nil {
-	// 	log.Fatalf("Unable to retrieve Sheets client: %v", err)
-	// }
-
-	// ID da pasta compartilhada
-	// c.Query("id")
-	folderID := ctx.Param("id")
-	// Listar os arquivos na pasta compartilhada
-	// files, err := srv.Files.List().
-	// 	Q(fmt.Sprintf("'%s' in parents", folderID)).
-	// 	Fields("nextPageToken, files(id, name, webViewLink, webContentLink)").
-	// 	Do()
-	// if err != nil {
-	// 	log.Fatalf("Não foi possível listar os arquivos: %v", err)
-	// }
-
-	// // Iterar sobre os arquivos e exibir as URLs das imagens
-	// for _, file := range files.Files {
-	// 	if file.MimeType == "image/jpeg" || file.MimeType == "image/png" {
-	// 		url := file.WebContentLink
-	// 		// Exibir a URL da imagem em uma tag de imagem em seu site
-	// 		log.Fatal("<img src='%s' alt='%s' />\n", url, file.Name)
-	// 	}
-	// }
-	response := []DrivePhotoResponse{}
-	//var files *drive.FileList
-	var err error
-	num, err := strconv.ParseInt(pageSize, 10, 64)
-	if err != nil {
-		log.Fatal(err)
-	}
-	pageToken := ctx.DefaultQuery("pageToken", "")
-	q := srv.Files.List().Q(fmt.Sprintf("'%s' in parents and trashed = false", folderID)).PageSize(num).PageToken(pageToken)
-	r, err := q.Do()
-	if err != nil {
-		fmt.Println("moio")
-	}
-
-	for _, f := range r.Files {
-		response = append(response, DrivePhotoResponse{
-			ID:   f.Id,
-			Name: f.Name,
-		})
-	}
-	// Check if there are more results
-	if r.NextPageToken != "" {
-		ctx.Header("nextPageToken", r.NextPageToken)
-	}
-	// for {
-	// 	if pageToken == "" {
-	// 		files, err = srv.Files.List().Q(fmt.Sprintf("'%s' in parents and trashed = false", folderID)).PageSize(num).Fields("files(id, name)").Do()
-	// 		if err != nil {
-	// 			log.Fatalf("Falha ao listar os arquivos na pasta compartilhada: %v", err)
-	// 		}
-
-	// 	} else {
-	// 		files, err = srv.Files.List().Q(fmt.Sprintf("'%s' in parents and trashed = false", folderID)).Fields("files(id, name)").Do()
-	// 		if err != nil {
-	// 			log.Fatalf("Falha ao listar os arquivos na pasta compartilhada: %v", err)
-	// 		}
-	// 	}
-
-	// 	// Imprimir os nomes e IDs dos arquivos na pasta compartilhada
-	// 	for _, f := range files.Files {
-
-	// 		// ID do arquivo da imagem
-	// 		// fileID := f.Id
-
-	// 		response = append(response, DrivePhotoResponse{
-	// 			ID:   f.Id,
-	// 			Name: f.Name,
-	// 		})
-	// 		// // Acessar as informações do arquivo
-	// 		// file, err := srv.Files.Get(fileID).Fields("webViewLink, webContentLink").Do()
-	// 		// if err != nil {
-	// 		// 	log.Fatalf("Não foi possível obter as informações do arquivo: %v", err)
-	// 		// }
-
-	// 		// // Exibir a imagem em uma tag de imagem em seu site
-	// 		// fmt.Printf("<img src='%s' alt='imagem' />\n", file.WebViewLink)
-
-	// 		// url := f.WebContentLink
-	// 		// fmt.Printf("Nome: %s, ID: %s\n", f.Name, f.Id, url)
-	// 	}
-	// 	// verifica se há mais páginas
-	// 	if files.NextPageToken == "" {
-	// 		break
-	// 	}
-
-	// 	// configura o token de página para obter a próxima página
-	// 	pageToken = files.NextPageToken
-	// }
-	return response
-
+//Makes the directory according with default.
+func createDIR(imageDir string, searchFolder string) error {
+	imageDir = getUploadFilesDIR(searchFolder)
+	return os.MkdirAll(imageDir, os.ModePerm)
 }
+
+// Creates a directory to store images if it doesn't exist.
+func getUploadFilesDIR(searchFolder string) string {
+	return "./images/" + searchFolder
+}
+
+//Gets the default name to file creation.
+func getCreateFilePath(imageDir string, imageID string) string {
+	return fmt.Sprintf("%s/%s.jpg", imageDir, imageID)
+}
+
+// Create a file to save the image
+func createOSFile(imagePath string) (*os.File, error) {
+	return os.Create(imagePath)
+}
+
+// Fetch the image content from Google Drive
+func fetchDriveFileByID(srv *drive.Service, imageID string) (*http.Response, error) {
+	return srv.Files.Get(imageID).Download()
+}
+
+// Copy the image content to the file on your server
+func copyDriveImageToFile(file *os.File, imageResp *http.Response) (int64, error) {
+	return io.Copy(file, imageResp.Body)
+}
+
+// Return the URL of the saved image
+func getDriveWebImageURL(searchFolder string, imageID string) string {
+	return "http://localhost:5000/images/" + searchFolder + "/" + imageID + ".jpg"
+}
+
+//Saves the image and get the URL according to the file attributes
+func SaveImageAndGetURL(searchFolder string, imageID string, imageName string, srv *drive.Service) (string, error) {
+	imageDir := getUploadFilesDIR(searchFolder)
+	if err := createDIR(imageDir, searchFolder); err != nil {
+		return "", err
+	}
+	imagePath := getCreateFilePath(imageDir, imageID)
+	file, err := createOSFile(imagePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	imageResp, err := fetchDriveFileByID(srv, imageID)
+	if err != nil {
+		return "", err
+	}
+	defer imageResp.Body.Close()
+
+	_, err = copyDriveImageToFile(file, imageResp)
+	if err != nil {
+		return "", err
+	}
+
+	imageURL := getDriveWebImageURL(searchFolder, imageID)
+	return imageURL, nil
+}
+
+//Gets the parameters from context.
+func getPageSizeAndFolderIDFromRequest(ctx *gin.Context) (string, string) {
+	pageSize := ctx.Query("pageSize")
+	searchFolder := ctx.Param("id")
+	return pageSize, searchFolder
+}
+
+//Gets the keys from redis.
+func getKeysFromRedis(ctx *gin.Context, redisClient *redis.Client, searchFolder string) ([]string, error) {
+	return redisClient.Keys(ctx, searchFolder+"*").Result()
+}
+
+//Converts pageSize from string to int64.
+func pageSizeToInt64(pageSize string) (int64, error) {
+	return strconv.ParseInt(pageSize, 10, 64)
+}
+
+// Verifies if the key is greather than zero.
+func hasRedisKeys(keys []string) bool {
+	if len(keys) <= 0 {
+		return false
+	}
+	return true
+}
+
+//Defines the default pageToken.
+func setEmptyPageToken(ctx *gin.Context) string {
+	return ctx.DefaultQuery("pageToken", "")
+}
+
+//Perform file query in google api.
+//Defines the folder ID and defines the total number of items to return.
+func getFilesFromDrive(srv *drive.Service, searchFolder string, pageToken string, num int64) (*drive.FileList, error) {
+	q := srv.Files.List().Q(fmt.Sprintf("'%s' in parents and trashed = false", searchFolder)).PageSize(num).PageToken(pageToken)
+	return q.Do()
+}
+
+//Add a response object with the file information
+func addDrivePhotoResponse(f *drive.File, imageURL string, response []DrivePhotoResponse) []DrivePhotoResponse {
+	result := append(response, DrivePhotoResponse{
+		ID:   f.Id,
+		Name: f.Name,
+		URL:  imageURL,
+	})
+	return result
+}
+
+// adiciona na resposta final o item do cache
+func addDrivePhotoResponseByObj(response []DrivePhotoResponse, drivePhotoResponse DrivePhotoResponse) []DrivePhotoResponse {
+	result := append(response, drivePhotoResponse)
+	return result
+}
+
+// faz serialização json do objeto de response criado
+func marshalFile(f *drive.File, imageURL string) ([]byte, error) {
+	return json.Marshal(DrivePhotoResponse{
+		ID:   f.Id,
+		Name: f.Name,
+		URL:  imageURL,
+	})
+}
+
+// busca pelo nome(concatenação pastaGoogle + file.ID) padrão
+func getCacheKey(f *drive.File, searchFolder string) string {
+	return fmt.Sprintf("%s_%s", searchFolder, f.Id)
+}
+
+// faz criação de chave no redis com valor
+func setCacheKey(redisClient *redis.Client, cacheKey string, ctx *gin.Context, responseJSON string) error {
+	return redisClient.Set(ctx, cacheKey, responseJSON, 0).Err()
+}
+
+// verifica se pageToken é nulo, caso-contrário adiciona o campo ao header
+func nextPageTokenIsEmpty(r *drive.FileList) bool {
+	return r.NextPageToken != ""
+}
+
+func getNextPageToken(r *drive.FileList) string {
+	return r.NextPageToken
+}
+
+//busca por chave no redis
+func getKeyFromRedis(redisClient *redis.Client, ctx *gin.Context, key string) ([]byte, error) {
+	return redisClient.Get(ctx, key).Bytes()
+}
+
+//faz unmarshalling de JSON para o objeto de resposta
+func unmarshalDrivePhotoResponse(cachedImage []byte, cachedResponse *DrivePhotoResponse) error {
+	return json.Unmarshal(cachedImage, &cachedResponse)
+}
+
+//Return products obtained from cache or drive api paginated. The process download the file and put into cache.
+func DriveProducts(ctx *gin.Context, srv *drive.Service, redisClient *redis.Client) []DrivePhotoResponse {
+	var err error
+	response := []DrivePhotoResponse{}
+	var nexPageTokenStr string
+
+	pageSize, searchFolder := getPageSizeAndFolderIDFromRequest(ctx)
+
+	keys, err := getKeysFromRedis(ctx, redisClient, searchFolder)
+	if err != nil {
+		log.Fatal("Error:", err)
+	}
+	if !hasRedisKeys(keys) {
+		num, err := pageSizeToInt64(pageSize)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		pageToken := setEmptyPageToken(ctx)
+		r, err := getFilesFromDrive(srv, searchFolder, pageToken, num)
+		if err != nil {
+			log.Fatal("fail my man...", err)
+		}
+
+		for _, f := range r.Files {
+			imageURL, err := SaveImageAndGetURL(searchFolder, f.Id, f.Name, srv)
+			if err != nil {
+				log.Printf("Error saving image: %v", err)
+			}
+			response = addDrivePhotoResponse(f, imageURL, response)
+			responseJSON, err := marshalFile(f, imageURL)
+			if err != nil {
+				log.Printf("Error to marshal to JSON: %v", err)
+			}
+			cacheKey := getCacheKey(f, searchFolder)
+			err = setCacheKey(redisClient, cacheKey, ctx, string(responseJSON))
+			if err != nil {
+				log.Printf("Erro to remain on cache: %v", err)
+			}
+			fmt.Println("The image has been added to the cache")
+		}
+		if nextPageTokenIsEmpty(r) {
+			nexPageTokenStr = r.NextPageToken
+		}
+		ctx.Header("nextPageToken", nexPageTokenStr)
+		return response
+	}
+
+	for _, key := range keys {
+		cachedImage, err := getKeyFromRedis(redisClient, ctx, key)
+		if err == nil {
+			fmt.Println("The image was found on cache!")
+			var cachedResponse DrivePhotoResponse
+			err := unmarshalDrivePhotoResponse(cachedImage, &cachedResponse)
+			if err != nil {
+				log.Printf("Error to unmarshall cache: %v", err)
+			}
+			response = addDrivePhotoResponseByObj(response, cachedResponse)
+		} else { //not found on cache
+			num, err := pageSizeToInt64(pageSize)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			pageToken := setEmptyPageToken(ctx)
+			r, err := getFilesFromDrive(srv, searchFolder, pageToken, num)
+			if err != nil {
+				log.Fatal("fail guys. My blame.", err)
+			}
+
+			for _, f := range r.Files {
+				imageURL, err := SaveImageAndGetURL(searchFolder, f.Id, f.Name, srv)
+				if err != nil {
+					log.Printf("Error saving image: %v", err)
+				}
+				response = addDrivePhotoResponse(f, imageURL, response)
+				responseJSON, err := marshalFile(f, imageURL)
+				if err != nil {
+					log.Printf("Erro ao serializar resposta para JSON: %v", err)
+				}
+				cacheKey := getCacheKey(f, searchFolder)
+				err = setCacheKey(redisClient, cacheKey, ctx, string(responseJSON))
+				if err != nil {
+					log.Printf("Erro ao armazenar resposta no cache: %v", err)
+				}
+				fmt.Println("Imagem carregada e armazenada em cache!")
+			}
+			if nextPageTokenIsEmpty(r) {
+				nexPageTokenStr = getNextPageToken(r)
+			}
+			ctx.Header("nextPageToken", nexPageTokenStr)
+			return response
+		}
+	}
+	ctx.Header("nextPageToken", nexPageTokenStr)
+	return response
+}
+
 func PermissionGoogle(ctx *gin.Context) {
 	url := googleOauthConfig.AuthCodeURL(oauthStateString)
 	ctx.Redirect(http.StatusTemporaryRedirect, url)

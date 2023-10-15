@@ -65,7 +65,7 @@ func NewDebtDB(db *gorm.DB) *DebtDB {
 func (d *DebtDB) CreateDB(srv *sheets.Service) error {
 	d.DB.AutoMigrate(&Debt{})
 
-	spreadsheetId := "1378DbQepNREL6WGkTsbjDb-rw2nXUJvcThQwso_yf6I"
+	spreadsheetId := "1xAcWfbWLulOTIcPHxvKsBlLeIaQam5OQf7BMMzhm71Y"
 	readRange := "parcelamentos!A3:F"
 
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetId, readRange).Do()

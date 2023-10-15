@@ -14,6 +14,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gin-gonic/gin"
 	"github.com/petini96/go-sheets/csvimporter"
+	"github.com/petini96/go-sheets/util"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
@@ -23,6 +25,7 @@ import (
 	"gorm.io/gorm"
 )
 
+//Open and create a file through own id. the path gived then uses the token and file created to encode.
 func saveToken(path string, token *oauth2.Token) {
 	fmt.Printf("Saving credential file to: %s\n", path)
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
@@ -32,6 +35,8 @@ func saveToken(path string, token *oauth2.Token) {
 	defer f.Close()
 	json.NewEncoder(f).Encode(token)
 }
+
+//Gets web token through own id. user agreements.
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
 	fmt.Printf("Go to the following link in your browser then type the "+
@@ -48,6 +53,8 @@ func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 	}
 	return tok
 }
+
+//Get token through own id. a file.
 func tokenFromFile(file string) (*oauth2.Token, error) {
 	f, err := os.Open(file)
 	if err != nil {
@@ -59,10 +66,8 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 	return tok, err
 }
 
+//Gets the http client thougt the config. Uses the json format.
 func getClient(config *oauth2.Config) *http.Client {
-	// The file token.json stores the user's access and refresh tokens, and is
-	// created automatically when the authorization flow completes for the first
-	// time.
 	tokFile := "token.json"
 	tok, err := tokenFromFile(tokFile)
 	if err != nil {
@@ -71,56 +76,52 @@ func getClient(config *oauth2.Config) *http.Client {
 	}
 	return config.Client(context.Background(), tok)
 }
+
+//Apply the cors policies.
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT")
-
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
 		}
-
 		c.Next()
 	}
 }
 
 //Client method to import data.
 func Import(db *gorm.DB) {
-
 }
-func Drive(ctx *gin.Context) {
 
-	// Configurar as credenciais de autenticação
+//Generic function to conect a folder through own id.
+func Drive(ctx *gin.Context) {
 	creds, err := google.FindDefaultCredentials(ctx, drive.DriveScope)
 	if err != nil {
 		log.Fatalf("Falha ao encontrar credenciais padrão: %v", err)
 	}
 
-	// Configurar o cliente da API do Google Drive
 	srv, err := drive.NewService(ctx, option.WithCredentials(creds))
 	if err != nil {
 		log.Fatalf("Falha ao criar o cliente da API do Google Drive: %v", err)
 	}
 
-	// ID da pasta compartilhada
-	folderID := "1WURcRzgC8mktrb4elvrmA-jtrjkxKCBj"
+	folderID := "1WURcRzgC8mktrb4elvrmA-jtrjkxKCBj" //id from folder shared
 
-	// Listar os arquivos na pasta compartilhada
 	files, err := srv.Files.List().Q(fmt.Sprintf("'%s' in parents and trashed = false", folderID)).Fields("files(id, name)").Do()
 	if err != nil {
 		log.Fatalf("Falha ao listar os arquivos na pasta compartilhada: %v", err)
 	}
 
-	// Imprimir os nomes e IDs dos arquivos na pasta compartilhada
 	for _, f := range files.Files {
 		log.Fatal(fmt.Printf("Nome: %s, ID: %s\n", f.Name, f.Id))
 	}
 }
+
+//Download a image through a URL link.
 func Download(imageUrl string) {
-	// Faça o download da imagem usando o Go
 	imageResponse, err := http.Get(imageUrl)
 	if err != nil {
 		fmt.Println("Erro ao fazer o download da imagem:", err)
@@ -136,78 +137,110 @@ func Download(imageUrl string) {
 	}
 	defer file.Close()
 
-	// Salve a imagem no arquivo
 	_, err = io.Copy(file, imageResponse.Body)
 	if err != nil {
 		fmt.Println("Erro ao salvar a imagem no arquivo:", err)
 		return
 	}
 }
-func Yuppo() []string {
-	// URL da página que contém as imagens
-	url := "https://minkang.x.yupoo.com/categories/3855959"
 
-	// Faz a solicitação HTTP para a página
+//Do a scrapping fish on site yuppo.
+func Yuppo() []string {
+	url := "https://minkang.x.yupoo.com/categories/3855959" //page url
+
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
 
-	// Analisa a página HTML usando a biblioteca goquery
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	doc, err := goquery.NewDocumentFromReader(resp.Body) //uses the goquery lib to do a Scraping Fish.
 	if err != nil {
 		log.Fatal(err)
 	}
 	var links []string
-	// Seleciona todos os elementos HTML com a classe "thumb"
-	doc.Find(".album__absolute.album__img.autocover").Each(func(i int, s *goquery.Selection) {
 
-		// Extrai o valor do atributo "src" de cada elemento
-		imgSrc, exists := s.Attr("data-src")
+	doc.Find(".album__absolute.album__img.autocover").Each(func(i int, s *goquery.Selection) { // Seleciona all elements HTML
+		imgSrc, exists := s.Attr("data-src") // get only src
 		if exists {
 			link := fmt.Sprintf("https:" + imgSrc)
 			Download(link)
 			links = append(links, link)
-			// Imprime o URL completo da imagem
-
 		}
 	})
 	return links
 }
+
 func main() {
 	var srv *drive.Service
 
-	dsn := "host=172.21.16.1 user=postgres password=secret dbname=bolerada67 port=5432 sslmode=disable TimeZone=America/Sao_Paulo"
+	config, err := util.LoadConfig(".")
+	if err != nil {
+		log.Fatal("cannot load config: ", err)
+	}
+
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=America/Sao_Paulo",
+		config.DbHost, config.DbUsername, config.DbPassword, config.DbDatabase, config.DbPort)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatal("wow man! It's a little pork...")
+		log.Fatal("Wow man! It's a little pork...")
 	}
+
+	redisAdd := fmt.Sprintf("%s:%s", config.RedisHost, config.RedisPort)
+	cache := redis.NewClient(&redis.Options{
+		Addr:     redisAdd,
+		Password: config.RedisPassword,
+		DB:       config.RedisDatabase,
+	})
 
 	r := gin.Default()
 	r.Use(CORSMiddleware())
-	r.GET("/start", func(c *gin.Context) {
+
+	//Do a simple cache test.
+	r.GET("/tests/cache/:id", func(c *gin.Context) {
 		ctx := context.Background()
-		srv, err = drive.NewService(ctx, option.WithAPIKey("AIzaSyCvj50k6p4pvPF5YmADMkZwkAkV3r1r8Kk"))
+		err = cache.Set(ctx, "key", "value", 0).Err()
+		if err != nil {
+			panic(err)
+		}
+
+		val, err := cache.Get(ctx, "key").Result()
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("key", val)
+
+		val2, err := cache.Get(ctx, "key").Result()
+		if err == redis.Nil {
+			fmt.Println("key2 does not exist")
+		} else if err != nil {
+			panic(err)
+		} else {
+			fmt.Println("key2", val2)
+		}
+	})
+	//Makes a test to test the connection with google.
+	r.GET("/tests/drive/conection", func(c *gin.Context) {
+		ctx := context.Background()
+		srv, err = drive.NewService(ctx, option.WithAPIKey(config.ApiKey))
 		if err != nil {
 			log.Fatalf("Unable to retrieve Sheets client: %v", err)
 		}
 	})
-	r.GET("/products/folder/:id", func(c *gin.Context) {
-		// c.Writer.Header().Set("Nextpagetoken", "fs")
-
+	//Makes a download from google drive and save into cache.
+	r.GET("/tests/drive/products/folder/:id", func(c *gin.Context) {
 		c.Header("Access-Control-Expose-Headers", "Nextpagetoken")
-
+		srv, err = drive.NewService(c, option.WithAPIKey("AIzaSyCvj50k6p4pvPF5YmADMkZwkAkV3r1r8Kk"))
+		if err != nil {
+			log.Fatalf("Unable to retrieve Sheets client: %v", err)
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"message":  "pong",
-			"products": csvimporter.DriveProducts(c, srv),
+			"products": csvimporter.DriveProducts(c, srv, cache),
 		})
-
-		// csvimporter.PermissionGoogle(c)
 	})
 	r.GET("xaxaxa", func(c *gin.Context) {
-
 		csvimporter.PermissionGoogleDrive(c, c.Query("id"))
 		c.JSON(http.StatusOK, gin.H{
 			"message":  "pong",
@@ -216,7 +249,6 @@ func main() {
 	})
 	r.GET("/import", func(c *gin.Context) {
 		csvimporter.PermissionGoogle(c)
-
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
@@ -226,7 +258,6 @@ func main() {
 		})
 	})
 	r.GET("/products-yuppo", func(c *gin.Context) {
-
 		c.JSON(http.StatusOK, gin.H{
 			"message":  "pong",
 			"products": Yuppo(),
@@ -234,32 +265,22 @@ func main() {
 	})
 
 	r.GET("/storage", func(c *gin.Context) {
-		// URL da página que contém as imagens
 		url := "https://minkang.x.yupoo.com/categories/3855959"
-
-		// Faz a solicitação HTTP para a página
 		resp, err := http.Get(url)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer resp.Body.Close()
-
-		// Analisa a página HTML usando a biblioteca goquery
 		doc, err := goquery.NewDocumentFromReader(resp.Body)
 		if err != nil {
 			log.Fatal(err)
 		}
 		var links []string
-		// Seleciona todos os elementos HTML com a classe "thumb"
 		doc.Find(".album__absolute.album__img.autocover").Each(func(i int, s *goquery.Selection) {
-
-			// Extrai o valor do atributo "src" de cada elemento
 			imgSrc, exists := s.Attr("data-src")
 			if exists {
 				link := fmt.Sprintf("https:" + imgSrc)
 				links = append(links, link)
-				// Imprime o URL completo da imagem
-
 			}
 		})
 		resp, err = http.Get(links[0])
@@ -269,14 +290,12 @@ func main() {
 		}
 		defer resp.Body.Close()
 
-		// Escreva a imagem no corpo da resposta
 		imgBytes, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			c.AbortWithError(http.StatusInternalServerError, err)
 			return
 		}
 		c.Data(http.StatusOK, "image/jpeg", imgBytes)
-		// c.File("path/to/image.jpg")
 	})
 
 	r.GET("/products", func(c *gin.Context) {
@@ -337,5 +356,7 @@ func main() {
 			"suppliers": suppliers,
 		})
 	})
-	r.Run("0.0.0.0:5000")
+	serverHost := fmt.Sprintf("%s:%s", config.ServerHost, config.ServerPort)
+	r.Static("/images", "./images")
+	r.Run(serverHost)
 }

@@ -1,6 +1,7 @@
 package csvimporter
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -20,6 +21,15 @@ type SimpleTable struct {
 type DrivePhotoResponse struct {
 	Name string `json:"name"`
 	ID   string `json:"id"`
+	URL  string `json:"url"`
+}
+
+func (d DrivePhotoResponse) MarshalBinary() ([]byte, error) {
+	return json.Marshal(d)
+}
+
+func (d *DrivePhotoResponse) UnmarshalBinary(data []byte) error {
+	return json.Unmarshal(data, d)
 }
 
 func Callback(ctx *gin.Context, db *gorm.DB) error {
@@ -30,6 +40,7 @@ func Callback(ctx *gin.Context, db *gorm.DB) error {
 	if state != oauthStateString {
 		return errors.New("fail")
 	}
+
 	token, err := googleOauthConfig.Exchange(oauth2.NoContext, code)
 	if err != nil {
 		return fmt.Errorf("code exchange failed: %s", err.Error())
@@ -37,48 +48,71 @@ func Callback(ctx *gin.Context, db *gorm.DB) error {
 
 	client := googleOauthConfig.Client(ctx, token)
 
-	// categoryDB := NewCategoryDB(db)
-	// err = Import(categoryDB, client)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
+	categoryDB := NewCategoryDB(db)
+	err = Import(categoryDB, client)
+	if err != nil {
+		fmt.Println(err)
+	}
 
-	// typeDB := NewTypeDB(db)
-	// err = Import(typeDB, client)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
+	typeDB := NewTypeDB(db)
+	err = Import(typeDB, client)
+	if err != nil {
+		fmt.Println(err)
+	}
 
-	// productDB := NewProductDB(db)
-	// err = Import(productDB, client)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
+	productDB := NewProductDB(db)
+	err = Import(productDB, client)
+	if err != nil {
+		fmt.Println(err)
+	}
 
-	// supplierDB := NewSupplierDB(db)
-	// err = Import(supplierDB, client)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
+	supplierDB := NewSupplierDB(db)
+	err = Import(supplierDB, client)
+	if err != nil {
+		fmt.Println(err)
+	}
 
-	// clientDB := NewClientDB(db)
-	// err = Import(clientDB, client)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
+	clientDB := NewClientDB(db)
+	err = Import(clientDB, client)
+	if err != nil {
+		fmt.Println(err)
+	}
 
-	// debtDB := NewDebtDB(db)
-	// err = Import(debtDB, client)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
+	debtDB := NewDebtDB(db)
+	err = Import(debtDB, client)
+	if err != nil {
+		fmt.Println(err)
+	}
 
-	// installmentDB := NewInstallmentDB(db)
-	// err = Import(installmentDB, client)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
+	installmentDB := NewInstallmentDB(db)
+	err = Import(installmentDB, client)
+	if err != nil {
+		fmt.Println(err)
+	}
 
+	purchaseDB := NewPurchaseDB(db)
+	err = Import(purchaseDB, client)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	personalizationDB := NewPersonalizationDB(db)
+	err = Import(personalizationDB, client)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	purchaseItemDB := NewPurchaseItemDB(db)
+	err = Import(purchaseItemDB, client)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	order := NewOrderDB(db)
+	err = Import(order, client)
+	if err != nil {
+		fmt.Println(err)
+	}
 	// Configurar o cliente da API do Google Drive
 	// srv, err := drive.NewService(ctx, option.WithCredentials(creds))
 	// if err != nil {
@@ -125,6 +159,7 @@ func Callback(ctx *gin.Context, db *gorm.DB) error {
 		response = append(response, DrivePhotoResponse{
 			ID:   f.Id,
 			Name: f.Name,
+			URL:  f.Name,
 		})
 		// // Acessar as informações do arquivo
 		// file, err := srv.Files.Get(fileID).Fields("webViewLink, webContentLink").Do()
