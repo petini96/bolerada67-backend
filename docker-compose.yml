@@ -1,9 +1,62 @@
-web:
-  image: nginx
-  volumes:
-   - ./templates:/etc/nginx/templates
-  ports:
-   - "8080:80"
-  environment:
-   - NGINX_HOST=foobar.com
-   - NGINX_PORT=80
+version: '3.9'
+
+services:
+  web:
+    image: nginx
+    volumes:
+    - ./templates:/etc/nginx/templates
+    ports:
+    - "8080:80"
+    environment:
+    - NGINX_HOST=foobar.com
+    - NGINX_PORT=80
+
+  postgresql:
+    image: postgres:latest
+    container_name: postgresql
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: bolerada67
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      TZ: America/Campo_Grande
+    volumes:
+      - postgresql:/var/lib/postgresql/data
+    networks:
+      - default
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    hostname: redis
+    restart: always
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes --loglevel debug --requirepass eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
+    networks:
+      - default
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  redis:
+    driver: local
+  postgresql:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
